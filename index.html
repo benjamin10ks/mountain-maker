@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mountain Maker</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <header>
+          <h1>Mountain Maker</h1>
+          <p class="muted">US terrain → printable STL</p>
+        </header>
+
+        <section>
+          <h2>1 · Area</h2>
+          <form id="search-form">
+            <input id="search-input" type="search" placeholder="Search a peak or place, e.g. Mount Rainier" />
+            <button type="submit">Search</button>
+          </form>
+          <ul id="search-results"></ul>
+          <button id="draw-btn" type="button">Draw area on map</button>
+          <p id="area-info" class="muted">No area selected.</p>
+        </section>
+
+        <section>
+          <h2>2 · Printer</h2>
+          <label>Printer <select id="printer"></select></label>
+          <div class="row">
+            <label>Bed X <input id="bed-x" type="number" min="50" /></label>
+            <label>Bed Y <input id="bed-y" type="number" min="50" /></label>
+            <label>Bed Z <input id="bed-z" type="number" min="50" /></label>
+          </div>
+          <div class="row">
+            <label>Nozzle (mm) <select id="nozzle"></select></label>
+            <label>Layer (mm) <input id="layer" type="number" min="0.04" max="0.6" step="0.04" value="0.2" /></label>
+          </div>
+        </section>
+
+        <section>
+          <h2>3 · Model</h2>
+          <label>Width, east–west (mm) <input id="width" type="number" min="20" value="120" /></label>
+          <label>
+            Vertical exaggeration <output id="exag-out">1.5×</output>
+            <input id="exag" type="range" min="1" max="5" step="0.1" value="1.5" />
+          </label>
+          <label>Base thickness (mm) <input id="base" type="number" min="1" step="0.5" value="5" /></label>
+        </section>
+
+        <section>
+          <h2>4 · Resolution</h2>
+          <div id="rec" class="card muted">Select an area to get a recommendation.</div>
+          <div class="row">
+            <label class="check"><input id="custom-res" type="checkbox" /> Custom</label>
+            <label>Columns <input id="cols" type="number" min="2" max="8000" disabled /></label>
+          </div>
+        </section>
+
+        <section class="actions">
+          <button id="generate" class="primary" type="button" disabled>Generate model</button>
+          <button id="download" type="button" disabled>Download STL</button>
+          <p id="status" class="muted" role="status"></p>
+          <div id="stats"></div>
+        </section>
+      </aside>
+      <main>
+        <div id="map"></div>
+        <div id="preview"><p class="placeholder">Your model preview appears here.</p></div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
