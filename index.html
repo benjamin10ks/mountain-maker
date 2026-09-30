@@ -4,17 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mountain Maker</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M1 28 12 8l5 9 4-6 10 17z' fill='%23c8492a'/%3E%3C/svg%3E" />
   </head>
   <body>
     <div id="app">
       <aside id="sidebar">
         <header>
           <h1>Mountain Maker</h1>
-          <p class="muted">US terrain → printable STL</p>
+          <p class="muted">US terrain → printable trophies</p>
         </header>
 
-        <section>
-          <h2>1 · Area</h2>
+        <details open>
+          <summary>1 · Area</summary>
           <form id="search-form">
             <input id="search-input" type="search" placeholder="Search a peak or place, e.g. Mount Rainier" />
             <button type="submit">Search</button>
@@ -22,10 +23,10 @@
           <ul id="search-results"></ul>
           <button id="draw-btn" type="button">Draw area on map</button>
           <p id="area-info" class="muted">No area selected.</p>
-        </section>
+        </details>
 
-        <section>
-          <h2>2 · Printer</h2>
+        <details open>
+          <summary>2 · Printer</summary>
           <label>Printer <select id="printer"></select></label>
           <div class="row">
             <label>Bed X <input id="bed-x" type="number" min="50" /></label>
@@ -36,26 +37,59 @@
             <label>Nozzle (mm) <select id="nozzle"></select></label>
             <label>Layer (mm) <input id="layer" type="number" min="0.04" max="0.6" step="0.04" value="0.2" /></label>
           </div>
-        </section>
+        </details>
 
-        <section>
-          <h2>3 · Model</h2>
-          <label>Width, east–west (mm) <input id="width" type="number" min="20" value="120" /></label>
+        <details open>
+          <summary>3 · Terrain</summary>
+          <label>Area width, east–west (mm) <input id="width" type="number" min="20" value="120" /></label>
           <label>
             Vertical exaggeration <output id="exag-out">1.5×</output>
             <input id="exag" type="range" min="1" max="5" step="0.1" value="1.5" />
           </label>
-          <label>Base thickness (mm) <input id="base" type="number" min="1" step="0.5" value="5" /></label>
-        </section>
+          <label>Terrain base thickness (mm) <input id="base" type="number" min="1" step="0.5" value="3" /></label>
+        </details>
 
-        <section>
-          <h2>4 · Resolution</h2>
+        <details open>
+          <summary>4 · Trophy</summary>
+          <div class="segmented" role="radiogroup" aria-label="Shape">
+            <label><input type="radio" name="shape" value="rectangle" checked /> Rectangle</label>
+            <label><input type="radio" name="shape" value="circle" /> Circle</label>
+            <label><input type="radio" name="shape" value="hexagon" /> Hexagon</label>
+          </div>
+          <div class="row">
+            <label>
+              Plinth
+              <select id="plinth">
+                <option value="none">None</option>
+                <option value="straight">Straight</option>
+                <option value="tapered" selected>Tapered</option>
+              </select>
+            </label>
+            <label>Height (mm) <input id="plinth-h" type="number" min="4" step="1" value="18" /></label>
+            <label id="taper-wrap">Taper (%) <input id="taper" type="number" min="0" max="40" step="1" value="10" /></label>
+          </div>
+          <fieldset id="plaque">
+            <legend>Nameplate</legend>
+            <label>Name <input id="text-name" type="text" placeholder="Mount Rainier" /></label>
+            <label>Subtitle <input id="text-sub" type="text" placeholder="e.g. Summited July 2026" /></label>
+            <label class="check"><input id="text-elev" type="checkbox" checked /> Add highest elevation in area</label>
+            <label class="check"><input id="text-caps" type="checkbox" checked /> All caps</label>
+            <div class="segmented" role="radiogroup" aria-label="Text style">
+              <label><input type="radio" name="text-style" value="raised" checked /> Raised</label>
+              <label><input type="radio" name="text-style" value="engraved" /> Engraved</label>
+            </div>
+            <p id="plaque-note" class="muted small"></p>
+          </fieldset>
+        </details>
+
+        <details open>
+          <summary>5 · Resolution</summary>
           <div id="rec" class="card muted">Select an area to get a recommendation.</div>
           <div class="row">
             <label class="check"><input id="custom-res" type="checkbox" /> Custom</label>
             <label>Columns <input id="cols" type="number" min="2" max="8000" disabled /></label>
           </div>
-        </section>
+        </details>
 
         <section class="actions">
           <button id="generate" class="primary" type="button" disabled>Generate model</button>
@@ -64,8 +98,10 @@
           <div id="stats"></div>
         </section>
       </aside>
+      <div class="splitter" id="split-sidebar" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
       <main>
         <div id="map"></div>
+        <div class="splitter" id="split-map" role="separator" aria-orientation="horizontal" aria-label="Resize map and preview" tabindex="0"></div>
         <div id="preview"><p class="placeholder">Your model preview appears here.</p></div>
       </main>
     </div>

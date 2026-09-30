@@ -1,12 +1,12 @@
 import './style.css';
-import { groundSizeMeters, type LngLatBounds } from './core/geo';
-import type { TerrainMesh } from './core/mesh';
+import { fractionsToLngLat, groundSizeMeters, type LngLatBounds } from './core/geo';
 import { describeGrid, NOZZLES_MM, PRINTERS, recommend, type Recommendation } from './core/printers';
-import { writeBinaryStl } from './core/stl';
+import { hasPlinth, plinthScale, trophyFootprint, type PlinthStyle, type Shape, type TrophyOptions } from './core/trophy';
+import { initLayout } from './ui/layout';
 import { createAreaMap } from './ui/map';
 import { createPreview } from './ui/preview';
 import { searchPlaces } from './ui/search';
-import type { BuildRequest, DemSummary, WorkerMessage } from './worker/protocol';
+import type { BuildRequest, BuildResult, PlaqueText, WorkerMessage } from './worker/protocol';
 
 const $ = <T extends HTMLElement = HTMLInputElement>(id: string) => document.getElementById(id) as T;
 
@@ -26,6 +26,16 @@ const ui = {
   exag: $('exag'),
   exagOut: $<HTMLOutputElement>('exag-out'),
   base: $('base'),
+  plinth: $<HTMLSelectElement>('plinth'),
+  plinthH: $('plinth-h'),
+  taper: $('taper'),
+  taperWrap: $<HTMLLabelElement>('taper-wrap'),
+  plaque: $<HTMLFieldSetElement>('plaque'),
+  plaqueNote: $<HTMLParagraphElement>('plaque-note'),
+  textName: $('text-name'),
+  textSub: $('text-sub'),
+  textElev: $('text-elev'),
+  textCaps: $('text-caps'),
   rec: $<HTMLDivElement>('rec'),
   customRes: $('custom-res'),
   cols: $('cols'),
@@ -37,7 +47,17 @@ const ui = {
 
 let bounds: LngLatBounds | null = null;
 let grid: Recommendation | null = null;
-let lastMesh: TerrainMesh | null = null;
+let built = false;
+/** True while the name field still holds the name we filled in from search. */
+let autoName = true;
+
+const num = (el: HTMLInputElement | HTMLSelectElement) => Number(el.value);
+const radio = (name: string) => (document.querySelector(`input[name="${name}"]:checked`) as HTMLInputElement).value;
+
+// ---- Layout -------------------------------------------------------------------
+
+const areaMap = createAreaMap($('map'), (b) => setArea(b));
+initLayout($('app'), document.querySelector('main')!, () => areaMap.map.resize());
 
 // ---- Printer setup ---------------------------------------------------------
 
@@ -57,11 +77,7 @@ ui.printer.addEventListener('change', () => {
 });
 applyPrinter();
 
-const num = (el: HTMLInputElement | HTMLSelectElement) => Number(el.value);
-
 // ---- Map and search -------------------------------------------------------
-
-const areaMap = createAreaMap($('map'), (b) => setArea(b));
 
 function setArea(b: LngLatBounds, fit = false) {
   bounds = b;
@@ -92,6 +108,7 @@ ui.searchForm.addEventListener('submit', async (e) => {
       li.title = p.name;
       li.addEventListener('click', () => {
         ui.searchResults.innerHTML = '';
+        if (autoName) ui.textName.value = p.name.split(',')[0];
         setArea(p.bounds, true);
       });
       ui.searchResults.appendChild(li);
@@ -101,11 +118,50 @@ ui.searchForm.addEventListener('submit', async (e) => {
   }
 });
 
-// ---- Recommendation ---------------------------------------------------------
+ui.textName.addEventListener('input', () => (autoName = ui.textName.value === ''));
+
+// ---- Settings → trophy options ---------------------------------------------
+
+function trophyOptions(): Omit<TrophyOptions, 'text'> {
+  return {
+    shape: radio('shape') as Shape,
+    plinth: ui.plinth.value as PlinthStyle,
+    plinthHeightMm: num(ui.plinthH),
+    taper: num(ui.taper) / 100,
+  };
+}
+
+function plaqueText(): PlaqueText | null {
+  const t: PlaqueText = {
+    name: ui.textName.value,
+    subtitle: ui.textSub.value,
+    includeElevation: ui.textElev.checked,
+    allCaps: ui.textCaps.checked,
+    style: radio('text-style') as PlaqueText['style'],
+  };
+  return t.name.trim() || t.subtitle.trim() || t.includeElevation ? t : null;
+}
+
+/** The trophy options with placeholder text, for layout decisions made before a build. */
+function trophyForLayout(): TrophyOptions {
+  const t = plaqueText();
+  return { ...trophyOptions(), text: t ? { lines: ['x'], style: t.style, depthMm: 0.8 } : null };
+}
+
+// ---- Recommendation and fit ---------------------------------------------------
 
 function update() {
   ui.exagOut.textContent = `${num(ui.exag).toFixed(1)}×`;
   ui.cols.disabled = !ui.customRes.checked;
+  const trophy = trophyForLayout();
+  ui.taperWrap.hidden = trophy.plinth !== 'tapered';
+  ui.plinthH.disabled = trophy.plinth === 'none';
+  ui.plaque.disabled = !hasPlinth(trophy);
+  ui.plaqueNote.textContent = hasPlinth(trophy)
+    ? trophy.shape === 'circle' && trophy.text
+      ? 'Round trophies get a flat front for the nameplate.'
+      : ''
+    : 'Add a plinth to put a nameplate on the front.';
   if (!bounds) return;
 
   const { widthM, heightM } = groundSizeMeters(bounds);
@@ -129,39 +185,71 @@ function update() {
     `${(grid.triangles / 1e6).toFixed(2)} M triangles · ${(grid.stlBytes / 1e6).toFixed(0)} MB STL` +
     grid.notes.map((n) => `<div class="note">${n}</div>`).join('');
 
+  // Show the printed shape on the map, and check the finished footprint fits the bed.
   const depthMm = (input.widthMm * heightM) / widthM;
-  const fits = input.widthMm <= num(ui.bedX) && depthMm <= num(ui.bedY);
+  const fp = trophyFootprint(trophy, input.widthMm, depthMm);
+  const uv = fp.outline.map(([x, y]): [number, number] => [x / input.widthMm + 0.5, y / depthMm + 0.5]);
+  areaMap.setCrop(fractionsToLngLat(bounds, uv));
+  const k = hasPlinth(trophy) ? plinthScale(trophy) : 1;
+  const [fw, fd] = [fp.width * k, fp.depth * k];
+  const fits = fw <= num(ui.bedX) && fd <= num(ui.bedY);
   ui.generate.disabled = !fits;
-  ui.status.textContent = fits ? '' : `Model is ${input.widthMm} × ${depthMm.toFixed(0)} mm: too big for the bed.`;
+  ui.status.textContent = fits ? '' : `Trophy is ${fw.toFixed(0)} × ${fd.toFixed(0)} mm: too big for the bed.`;
   ui.status.className = fits ? 'muted' : 'error';
 
-  if (lastMesh) scheduleRebuild();
+  if (built && fits) scheduleRebuild();
 }
 
-for (const el of [ui.bedX, ui.bedY, ui.bedZ, ui.nozzle, ui.layer, ui.width, ui.exag, ui.base, ui.customRes, ui.cols]) {
+document.querySelectorAll('#sidebar input, #sidebar select').forEach((el) => {
+  if (el.id === 'search-input') return;
   el.addEventListener('input', update);
-}
+});
 
-// ---- Build -------------------------------------------------------------------
+// ---- Build and export ---------------------------------------------------------
 
 const worker = new Worker(new URL('./worker/mesh.worker.ts', import.meta.url), { type: 'module' });
 const preview = createPreview($('preview'));
+let requestId = 0;
 let buildId = 0;
+let exportId = 0;
+
+// One build at a time: changes made while the worker is busy are coalesced into a single
+// follow-up build, so dragging a slider never queues a backlog of stale builds.
+let building = false;
+let buildAgain = false;
 
 function build() {
   if (!bounds || !grid || ui.generate.disabled) return;
+  if (building) {
+    buildAgain = true;
+    return;
+  }
+  building = true;
   const req: BuildRequest = {
-    id: ++buildId,
+    type: 'build',
+    id: (buildId = ++requestId),
     bounds,
     cols: grid.cols,
     rows: grid.rows,
     mesh: { widthMm: num(ui.width), exaggeration: num(ui.exag), baseMm: num(ui.base) },
+    trophy: trophyOptions(),
+    text: plaqueText(),
+    // Letters much smaller than ~7 nozzle widths lose their shape.
+    minCapHeightMm: Math.max(2.5, num(ui.nozzle) * 7),
   };
-  ui.generate.disabled = true;
+  ui.download.disabled = true;
   worker.postMessage(req);
 }
 
-// After the first model, tweaking settings re-meshes automatically. The worker caches
+function buildFinished() {
+  building = false;
+  if (buildAgain) {
+    buildAgain = false;
+    build();
+  }
+}
+
+// After the first model, tweaking settings rebuilds automatically. The worker caches
 // the DEM, so this only re-downloads when the area or resolution changes.
 let rebuildTimer: number | undefined;
 function scheduleRebuild() {
@@ -171,50 +259,62 @@ function scheduleRebuild() {
 
 worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
   const msg = e.data;
-  if (msg.id !== buildId) return; // a newer build superseded this one
+  if (msg.id !== buildId && msg.id !== exportId) return; // superseded
   if (msg.type === 'progress') {
     ui.status.className = 'muted';
     ui.status.textContent = msg.message;
     return;
   }
-  ui.generate.disabled = false;
   if (msg.type === 'error') {
+    if (msg.id === buildId) buildFinished();
+    ui.download.disabled = !built;
     ui.status.className = 'error';
     ui.status.textContent = msg.message;
     return;
   }
-  lastMesh = msg.mesh;
-  $('preview').querySelector('.placeholder')?.remove();
-  preview.show(msg.mesh);
+  if (msg.type === 'stl') {
+    ui.download.disabled = false;
+    ui.status.textContent = '';
+    saveStl(msg.stl);
+    return;
+  }
   ui.download.disabled = false;
   ui.status.textContent = '';
-  showStats(msg.mesh, msg.dem);
+  built = true;
+  buildFinished();
+  $('preview').querySelector('.placeholder')?.remove();
+  preview.show(msg.result.preview.positions, msg.result.preview.normals, msg.result.sizeMm);
+  showStats(msg.result);
 };
 
-function showStats(mesh: TerrainMesh, dem: DemSummary) {
-  const [x, y, z] = mesh.sizeMm;
-  const zScale = (num(ui.width) / dem.groundWidthM) * num(ui.exag);
+function showStats(r: BuildResult) {
+  const [x, y, z] = r.sizeMm;
+  const zScale = (num(ui.width) / r.dem.groundWidthM) * num(ui.exag);
   const metersPerLayer = num(ui.layer) / zScale;
-  const tooTall = z > num(ui.bedZ);
+  const notes = [...r.warnings];
+  if (z > num(ui.bedZ)) notes.push("Taller than the printer's build height.");
   ui.stats.innerHTML = `<dl>
-    <dt>Model</dt><dd>${x.toFixed(0)} × ${y.toFixed(0)} × ${z.toFixed(1)} mm</dd>
-    <dt>Elevation</dt><dd>${dem.minM.toFixed(0)}–${dem.maxM.toFixed(0)} m (${(dem.minM * 3.281).toFixed(0)}–${(dem.maxM * 3.281).toFixed(0)} ft)</dd>
-    <dt>Triangles</dt><dd>${mesh.triangleCount.toLocaleString()}</dd>
+    <dt>Trophy</dt><dd>${x.toFixed(0)} × ${y.toFixed(0)} × ${z.toFixed(1)} mm</dd>
+    <dt>Elevation</dt><dd>${r.dem.minM.toFixed(0)}–${r.dem.maxM.toFixed(0)} m (${(r.dem.minM * 3.281).toFixed(0)}–${(r.dem.maxM * 3.281).toFixed(0)} ft)</dd>
+    <dt>Triangles</dt><dd>${r.triangleCount.toLocaleString()}</dd>
+    <dt>Built in</dt><dd>${r.buildMs.toFixed(0)} ms${r.downloadMs ? ` + ${(r.downloadMs / 1000).toFixed(1)} s download` : ''}</dd>
     <dt>Per layer</dt><dd>each ${num(ui.layer)} mm layer ≈ ${metersPerLayer.toFixed(1)} m of elevation</dd>
-  </dl>${tooTall ? '<div class="note">Taller than the printer\'s build height.</div>' : ''}`;
+  </dl>${notes.map((n) => `<div class="note">${n}</div>`).join('')}`;
 }
 
-ui.generate.addEventListener('click', build);
-
-ui.download.addEventListener('click', () => {
-  if (!lastMesh) return;
-  const stl = writeBinaryStl(lastMesh.positions, lastMesh.indices);
+function saveStl(stl: ArrayBuffer) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([stl], { type: 'model/stl' }));
-  const name = ui.searchInput.value.trim().replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'terrain';
+  const name = (ui.textName.value || ui.searchInput.value).trim().replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'terrain';
   a.download = `${name}.stl`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+ui.generate.addEventListener('click', build);
+ui.download.addEventListener('click', () => {
+  ui.download.disabled = true;
+  worker.postMessage({ type: 'export', id: (exportId = ++requestId) });
 });
 
 update();

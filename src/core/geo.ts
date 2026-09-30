@@ -45,3 +45,16 @@ export function boxAround(lng: number, lat: number, sizeM: number): LngLatBounds
   const dLng = dLat / Math.cos(lat * DEG);
   return { west: lng - dLng, south: lat - dLat, east: lng + dLng, north: lat + dLat };
 }
+
+export function mercatorToLngLat(x: number, y: number): [number, number] {
+  return [x / R / DEG, (2 * Math.atan(Math.exp(y / R)) - Math.PI / 2) / DEG];
+}
+
+/**
+ * Map a shape given in fractions of an area ([0,0] = south-west corner, [1,1] =
+ * north-east) to lng/lat. Interpolates in Mercator, which is linear in model space.
+ */
+export function fractionsToLngLat(b: LngLatBounds, uv: [number, number][]): [number, number][] {
+  const m = toMercatorBounds(b);
+  return uv.map(([u, v]) => mercatorToLngLat(m.xmin + u * (m.xmax - m.xmin), m.ymin + v * (m.ymax - m.ymin)));
+}

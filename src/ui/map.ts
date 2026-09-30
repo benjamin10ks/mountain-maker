@@ -14,6 +14,8 @@ const USGS_TOPO =
 export interface AreaMap {
   map: maplibregl.Map;
   setSelection(b: LngLatBounds | null, fit?: boolean): void;
+  /** Outline of the part of the selection that will be printed (lng/lat ring). */
+  setCrop(ring: [number, number][] | null): void;
   startDrawing(): void;
 }
 
@@ -41,6 +43,7 @@ export function createAreaMap(container: HTMLElement, onSelect: (b: LngLatBounds
   map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-left');
 
   let pending: LngLatBounds | null = null;
+  let pendingCrop: [number, number][] | null = null;
   const empty = { type: 'FeatureCollection' as const, features: [] };
   const toGeoJson = (b: LngLatBounds | null) =>
     b
@@ -60,10 +63,23 @@ export function createAreaMap(container: HTMLElement, onSelect: (b: LngLatBounds
     else pending = b;
   };
 
+  const cropGeoJson = (ring: [number, number][] | null) =>
+    ring
+      ? { type: 'Feature' as const, properties: {}, geometry: { type: 'Polygon' as const, coordinates: [[...ring, ring[0]]] } }
+      : empty;
+
+  // The selection is drawn as a dashed box; the printed shape inside it is filled.
   map.on('load', () => {
     map.addSource('selection', { type: 'geojson', data: toGeoJson(pending) });
-    map.addLayer({ id: 'selection-fill', type: 'fill', source: 'selection', paint: { 'fill-color': '#e4572e', 'fill-opacity': 0.15 } });
-    map.addLayer({ id: 'selection-line', type: 'line', source: 'selection', paint: { 'line-color': '#e4572e', 'line-width': 2 } });
+    map.addSource('crop', { type: 'geojson', data: cropGeoJson(pendingCrop) });
+    map.addLayer({ id: 'crop-fill', type: 'fill', source: 'crop', paint: { 'fill-color': '#e4572e', 'fill-opacity': 0.18 } });
+    map.addLayer({ id: 'crop-line', type: 'line', source: 'crop', paint: { 'line-color': '#e4572e', 'line-width': 2 } });
+    map.addLayer({
+      id: 'selection-line',
+      type: 'line',
+      source: 'selection',
+      paint: { 'line-color': '#e4572e', 'line-width': 1.5, 'line-dasharray': [3, 2] },
+    });
   });
 
   // Drawing: press the button, then click-drag on the map.
@@ -102,6 +118,11 @@ export function createAreaMap(container: HTMLElement, onSelect: (b: LngLatBounds
     setSelection(b, fit = false) {
       render(b);
       if (b && fit) map.fitBounds([[b.west, b.south], [b.east, b.north]], { padding: 60, duration: 1200 });
+    },
+    setCrop(ring) {
+      const src = map.getSource<GeoJSONSource>('crop');
+      if (src) src.setData(cropGeoJson(ring));
+      else pendingCrop = ring;
     },
     startDrawing() {
       drawing = true;

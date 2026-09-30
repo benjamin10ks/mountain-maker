@@ -18,18 +18,25 @@ npm run dev          # http://localhost:5173
    **Draw area on map** and click-drag a rectangle.
 2. **Printer:** choose a preset (Bambu A1 mini / A1 / P1S / X1C / H2D, Prusa MK4) or
    **Custom**, then set nozzle and layer height.
-3. **Model:** width in mm, vertical exaggeration, and base thickness.
-4. **Resolution:** the recommended grid is shown with the reason for the limit. Tick
+3. **Terrain:** area width in mm, vertical exaggeration, and terrain base thickness.
+4. **Trophy:** shape (rectangle, circle, hexagon), plinth (none, straight, tapered), and
+   a nameplate on the plinth's front: name, optional subtitle (e.g. a summit date), the
+   highest elevation in the area, raised or engraved.
+5. **Resolution:** the recommended grid is shown with the reason for the limit. Tick
    **Custom** to override it.
-5. **Generate model**, inspect the 3D preview, then **Download STL**. After the first
-   build, changing settings re-meshes automatically; the elevation data is re-downloaded
+6. **Generate model**, inspect the 3D preview, then **Download STL**. After the first
+   build, changing settings rebuilds automatically; the elevation data is re-downloaded
    only when the area or resolution changes.
+
+The sidebar, map and preview are separated by draggable dividers. Double-click a
+divider (or focus it and press Home) to reset it; arrow keys nudge it. Sizes are
+remembered per browser. Sidebar sections collapse by clicking their headings.
 
 Other scripts:
 
 | Command | What it does |
 |---|---|
-| `npm test` | Unit tests: mesh is closed and outward-facing, STL format, recommendations |
+| `npm test` | Unit tests: every mesh, crop and trophy variant is a closed, outward-facing solid; text layout; STL format; recommendations |
 | `npm run test:live` | End-to-end against the real USGS service; writes `rainier.stl` |
 | `npm run typecheck` | TypeScript check |
 | `npm run build` | Production build to `dist/` (a static site) |
@@ -37,10 +44,12 @@ Other scripts:
 ## How it works
 
 ```
- Map (MapLibre + USGS Topo) ──bbox──►  Web Worker                       Main thread
- Search (Nominatim)                    1. fetch GeoTIFF from 3DEP        three.js preview
- Printer + model settings ──grid──►    2. clean no-data                  STL download
-                                       3. build watertight mesh ──mesh──►
+ Map (MapLibre + USGS Topo) ──bbox──►  Web Worker                          Main thread
+ Search (Nominatim)                    1. fetch GeoTIFF from 3DEP (cached) three.js preview
+ Printer, terrain, trophy  ──opts──►   2. crop terrain to the shape
+                                       3. plinth + nameplate (manifold)
+                                       4. creased normals ──preview──►
+ Download ─────────────────export──►   5. weld parts, write STL ──stl──► file save
 ```
 
 | File | Role |
@@ -48,12 +57,17 @@ Other scripts:
 | `src/core/geo.ts` | Web Mercator math, ground size of an area |
 | `src/core/dem.ts` | Fetch and decode elevation from USGS 3DEP, fill gaps |
 | `src/core/mesh.ts` | Height grid → closed solid (surface, walls, bottom) |
+| `src/core/crop.ts` | Terrain solid cropped to a convex outline (circle, hexagon…) |
+| `src/core/trophy.ts` | Footprint shapes, plinth, nameplate, export weld |
+| `src/core/text.ts` | Font outlines → polygons, two-line plaque layout |
+| `src/core/normals.ts` | Creased normals for the preview |
 | `src/core/stl.ts` | Binary STL writer |
 | `src/core/printers.ts` | Printer presets and the resolution recommendation |
-| `src/worker/mesh.worker.ts` | Runs download + meshing off the UI thread, caches the last DEM |
+| `src/worker/mesh.worker.ts` | Runs download, meshing, CSG and STL export off the UI thread |
 | `src/ui/map.ts` | Basemap and rectangle selection |
 | `src/ui/search.ts` | Place search |
 | `src/ui/preview.ts` | 3D viewer |
+| `src/ui/layout.ts` | Resizable panes |
 | `src/main.ts` | Wires the UI together |
 
 `src/core/` has no DOM dependencies, so it can be reused for a CLI or server later
@@ -145,10 +159,17 @@ well at this scale, which is typical for a single peak.
 
 ### 5. Web Worker
 
-Download, GeoTIFF decode and meshing run in `mesh.worker.ts`, so the map and preview never
-freeze. Mesh buffers are **transferred** (zero-copy) back to the main thread. The worker
-caches the last DEM by (area, grid), so model-only changes skip the network. Builds carry
-an id, and the UI ignores results from builds that a newer one replaced.
+Download, GeoTIFF decode, meshing, CSG and STL writing run in `mesh.worker.ts`, so the
+map and preview never freeze. Buffers are **transferred** (zero-copy) back to the main
+thread. The worker caches the last DEM by (area, grid), so model-only changes skip the
+network.
+
+**Only one build runs at a time.** Changes made while a build is running set a flag,
+and exactly one follow-up build runs with the latest settings when it finishes. An
+earlier version queued a build per change, so a burst of edits made the worker grind
+through stale builds (7 s for three quick changes). The stats show the worker's build
+time (about 0.2–0.9 s for a full-resolution trophy) and the download time when there
+was one.
 
 ### 6. UI stack: vanilla TypeScript + Vite
 
@@ -183,9 +204,109 @@ Build volumes (mm): A1 mini 180³; A1, P1S/P1P, X1C/X1E 256³; H2D 350×320×325
 Prusa MK4/MK4S 250×210×220. **Custom** unlocks the bed fields. Presets live in
 `src/core/printers.ts`; add yours there.
 
+### 9. Trophy shapes
+
+- **Rectangle, circle, hexagon.** Circle and hexagon are the largest of their kind that fit
+  inside the selected area. The map shows the printed shape filled inside the dashed
+  selection box.
+- **Hexagons have a flat side facing south**, so there's a flat face for the nameplate.
+- **Round trophies with text get a flat front** (a "D" shape, chord at 80% of the radius).
+  Flat text wrapped onto a curved face would be distorted or need curved extrusion.
+  Without text, circles stay fully round.
+- "Area width" still means the width of the selected area. For circles and hexagons the
+  finished footprint is shown in the stats and checked against the bed.
+
+### 10. Cropping the terrain without CSG
+
+The first version cut the terrain with the CSG library (intersect with a cylinder). On a
+601 × 601 grid that took about 2.6 s per rebuild: roughly 1.3 s to import a
+720k-triangle mesh into manifold and 1.2 s for the intersection. That's too slow for live
+tweaks.
+
+Every footprint is **convex**, so `crop.ts` crops the grid directly:
+
+- Grid triangles fully inside the outline are kept as-is (99% of them, handled at the
+  speed of the plain rectangle mesh).
+- Triangles on the edge are clipped against the outline (Sutherland–Hodgman), and only
+  against the one or two outline edges that actually cross them.
+- New vertices on the cut are **keyed by the two lines that create them** (a grid edge
+  plus an outline edge, or two outline edges at a corner). Neighbouring triangles
+  therefore share them exactly: no cracks and no T-junctions. Heights on the cut are
+  interpolated along the grid edge, so they match the surface on both sides.
+- The cut edges form one counter-clockwise loop. Walls and a fanned bottom are built
+  from it exactly as for rectangles.
+- The outline is shrunk by 0.01% and nudged off the grid, so no grid vertex ever lands
+  exactly on it (inscribed shapes touch the area's border otherwise).
+
+Result: about 0.2 s instead of 2.6 s, checked by tests on odd and non-square grids for
+every shape.
+
+### 11. Plinth and nameplate: manifold-3d, on small parts only
+
+- **manifold-3d** (WASM) does the booleans. It guarantees manifold output, is the
+  fastest robust CSG library available in JS, and is Apache-2.0.
+- The plinth is an extrusion of the footprint. A **tapered** plinth is wider at the
+  bottom (default 10%); its front face leans back, and the text is tilted to match.
+- Text is **raised** (unioned) or **engraved** (subtracted), 0.8 mm deep, centered on the
+  front face. Line 1 is the name; line 2 is 55% the size and holds the elevation and
+  subtitle. The block is sized to fill 85% of the face width and 70% of its height. If
+  letters come out smaller than about 7 nozzle widths (2.8 mm at 0.4 mm), you get a
+  warning.
+- **Only the plinth goes through CSG** (a few hundred triangles), so text changes take
+  milliseconds.
+- **Terrain and plinth are separate solids that overlap by 0.02 mm.** The preview shows
+  them as-is. On **Download**, the worker welds them into one solid with a real union
+  (a few seconds at full resolution, shown as "Welding parts into one solid…"). The
+  exported STL is a single watertight solid; tests check both the parts and the welded
+  result, and a downloaded Rainier hexagon checked in `trimesh` is one closed body
+  (Euler number 2).
+- **Pass `scaleTop` to `Manifold.extrude` as `[s, s]`, not a number.** manifold-3d 3.5
+  treats a bare number as `[n, 0]` and silently collapses the top to a line, even though
+  its types allow a number. This turned every plinth into a wedge until a volume test
+  caught it. Tests now check plinth volumes against the prism and frustum formulas, and
+  check that text really adds (raised) or removes (engraved) material.
+- manifold objects live in WASM memory and are freed explicitly after each build.
+- The WASM file (540 KB) and font are loaded only when a plinth is first used.
+
+### 12. Text: opentype.js + Oswald
+
+- **Oswald Bold** (SIL Open Font License, bundled from `@fontsource/oswald`): a condensed
+  display face that reads well at small sizes and fits long peak names.
+- **opentype.js** parses the WOFF file. We **don't use its shaper** (`font.getPath`):
+  in v2.0 it throws on a GSUB lookup type Oswald uses, even with features turned off.
+  `text.ts` places glyphs itself using advance widths and pair kerning, which is all
+  plain Latin plaque text needs.
+- Curves are flattened to 6 segments each. Glyph contours are combined with the NonZero
+  fill rule, so counters (the holes in O, A, 8) come out correctly.
+- "All caps" is on by default (plaque style). The elevation is the highest sample in the
+  area, in feet. Bilinear resampling can read a few feet under the official summit
+  height; type the official figure in the subtitle and untick the checkbox if it
+  matters.
+
+### 13. Preview normals
+
+After cropping and CSG, surfaces share vertices across sharp edges, so plain smooth
+normals smear the plinth corners and letters. `normals.ts` computes **creased
+normals**: each corner averages only neighbouring faces within 40° of its own face.
+Terrain stays smooth, and edges and text stay crisp. It runs in the worker and ships
+non-indexed buffers straight to three.js.
+
+### 14. Resizable panes
+
+- **Why:** the map matters while choosing an area, and the preview while tuning the
+  trophy. The sidebar grows with long nameplate text.
+- CSS grid with the sizes in CSS variables (`--sidebar-w`, `--map-fr`/`--preview-fr`),
+  changed by two splitters (`layout.ts`). Pointer capture keeps a drag going over the
+  map and 3D canvases.
+- Sizes persist in `localStorage` (a per-browser convenience; failures are ignored).
+- Splitters are focusable `role="separator"` elements: arrow keys nudge, and Home or
+  double-click resets.
+- MapLibre is told to resize on every change; the preview follows via ResizeObserver.
+- On narrow screens (< 800 px) the panes stack and the splitters are hidden.
+
 ## Known limitations
 
-- Rectangles only. Circle/hexagon crops come in Phase 3.
+- Text is only on the front face, in one font.
 - Areas are measured with a single `cos(latitude)` scale. Very tall selections (hundreds
   of km north–south) will be slightly distorted.
 - The first production chunk is about 1.6 MB (MapLibre + three.js). This could be
@@ -197,8 +318,9 @@ Prusa MK4/MK4S 250×210×220. **Custom** unlocks the bed fields. Presets live in
 
 1. ~~**Core engine:** bbox → 3DEP → watertight STL~~ ✅
 2. ~~**Web UI:** map, search, drag-select, printer presets, recommendations, preview~~ ✅ (first version)
-3. **Trophy polish:** round/hex crops, plinth styles (tapered, stepped), raised or
-   engraved text (peak name, elevation, date) via `manifold-3d` (WASM), touch drawing
+3. ~~**Trophy:** round/hex crops, straight/tapered plinths, raised/engraved nameplate~~ ✅
+   Next: stepped plinth, font choice, text on the back, touch drawing, a mark at the
+   summit
 4. **Multi-color:** 3MF export with separate bodies (snowcap above an elevation, water,
    base) for the Bambu AMS
 5. **Hosting:** static deploy, production geocoder, code-splitting

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { TerrainMesh } from '../core/mesh';
 
 /** three.js viewer that shows exactly the mesh that will be exported. */
 export function createPreview(container: HTMLElement) {
@@ -19,6 +18,11 @@ export function createPreview(container: HTMLElement) {
   const sun = new THREE.DirectionalLight(0xffffff, 2);
   sun.position.set(-1, 1, 1.2); // low from the north-west, like a shaded relief map
   scene.add(sun);
+  // Raking fill from the front-left, so the nameplate (which faces south, away from the
+  // sun) is lit and the walls of engraved or raised letters cast visible shading.
+  const fill = new THREE.DirectionalLight(0xfff4e6, 1.1);
+  fill.position.set(-1.2, -1, 0.35);
+  scene.add(fill);
 
   const material = new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.85 });
   const group = new THREE.Group();
@@ -42,27 +46,16 @@ export function createPreview(container: HTMLElement) {
   let framedFor = 0;
 
   return {
-    show(mesh: TerrainMesh) {
+    /** Non-indexed triangles centered on the origin in x/y, bottom at z=0. */
+    show(positions: Float32Array, normals: Float32Array, sizeMm: [number, number, number]) {
       for (const child of group.children) (child as THREE.Mesh).geometry.dispose();
       group.clear();
 
-      // Smooth normals on the terrain, flat normals on the walls and bottom, so the
-      // edges don't smear. Both share the same position buffer.
-      const position = new THREE.BufferAttribute(mesh.positions, 3);
-      const top = new THREE.BufferGeometry();
-      top.setAttribute('position', position);
-      top.setIndex(new THREE.BufferAttribute(mesh.indices.subarray(0, mesh.topIndexCount), 1));
-      top.computeVertexNormals();
-
-      const sidesIndexed = new THREE.BufferGeometry();
-      sidesIndexed.setAttribute('position', position);
-      sidesIndexed.setIndex(new THREE.BufferAttribute(mesh.indices.subarray(mesh.topIndexCount), 1));
-      const sides = sidesIndexed.toNonIndexed();
-      sides.computeVertexNormals();
-
-      const [x, y, z] = mesh.sizeMm;
-      group.add(new THREE.Mesh(top, material), new THREE.Mesh(sides, material));
-      group.position.set(-x / 2, -y / 2, 0);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+      group.add(new THREE.Mesh(geometry, material));
+      const [x, y, z] = sizeMm;
 
       // Keep the user's view for small tweaks, but reframe when the model changes size
       // enough that it would be cropped or tiny (e.g. a big exaggeration change).

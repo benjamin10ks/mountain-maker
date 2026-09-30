@@ -27,30 +27,71 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); }
 
-#app { display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
-#sidebar { overflow-y: auto; padding: 16px; background: var(--panel); border-right: 1px solid var(--border); }
-main { display: grid; grid-template-rows: 1fr 1fr; min-height: 0; }
+#app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w, 340px) 6px minmax(0, 1fr);
+  height: 100vh;
+}
+#sidebar { overflow-y: auto; padding: 16px; background: var(--panel); min-width: 0; }
+main {
+  display: grid;
+  grid-template-rows: minmax(0, var(--map-fr, 1fr)) 6px minmax(0, var(--preview-fr, 1fr));
+  min-height: 0;
+  min-width: 0;
+}
 #map, #preview { position: relative; min-height: 0; }
-#preview { border-top: 1px solid var(--border); background: #1d2126; }
+#preview { background: #1d2126; }
 #preview canvas { display: block; }
 .placeholder { position: absolute; inset: 0; margin: auto; height: 1em; text-align: center; color: #9aa0a6; }
 
+.splitter { background: var(--border); position: relative; z-index: 2; touch-action: none; }
+.splitter::after { content: ''; position: absolute; inset: -4px; } /* bigger grab area */
+#split-sidebar { cursor: col-resize; }
+#split-map { cursor: row-resize; }
+.splitter:hover, .splitter:focus-visible { background: var(--accent); outline: none; }
+body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
+body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
+/* Keep the canvases from swallowing pointer events mid-drag. */
+body.resizing-x canvas, body.resizing-y canvas { pointer-events: none; }
+
 @media (max-width: 800px) {
   #app { grid-template-columns: 1fr; height: auto; }
-  #sidebar { border-right: none; }
+  .splitter { display: none; }
   main { grid-template-rows: 60vh 60vh; }
+  #preview { border-top: 1px solid var(--border); }
 }
 
 h1 { font-size: 20px; margin: 0; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 8px; }
 header { margin-bottom: 16px; }
 header p { margin: 2px 0 0; }
-section { padding: 14px 0; border-top: 1px solid var(--border); }
+section, details { padding: 12px 0; border-top: 1px solid var(--border); }
+summary {
+  cursor: pointer; list-style: none; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); font-weight: 600; margin-bottom: 8px;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before { content: '▸'; display: inline-block; width: 1em; transition: transform 0.15s; }
+details[open] > summary::before { transform: rotate(90deg); }
+details:not([open]) > summary { margin-bottom: 0; }
+fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px 4px; margin: 4px 0 0; }
+fieldset:disabled { opacity: 0.5; }
+legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+.small { font-size: 12px; margin: 4px 0; }
+.segmented { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.segmented label {
+  position: relative; flex: 1; margin: 0; text-align: center; padding: 6px 4px; cursor: pointer; font-size: 13px; color: var(--text);
+  border-left: 1px solid var(--border);
+}
+.segmented label:first-child { border-left: none; }
+.segmented input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.segmented label:has(input:checked) { background: var(--accent); color: var(--accent-text); }
+.segmented label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
 .muted { color: var(--muted); }
 
 label { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
 label.check { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
-input, select, button {
+input:not([type='radio']):not([type='checkbox']), select, button {
   font: inherit; color: var(--text); background: var(--bg);
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
 }
