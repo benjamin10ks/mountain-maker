@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { Dem } from '../src/core/dem';
 import { buildTerrainBody } from '../src/core/crop';
 import { layoutPlaque } from '../src/core/text';
-import { buildTrophyParts, footprint, unionParts, type TrophyOptions } from '../src/core/trophy';
+import { buildTrophyParts, footprint, unionParts, type PlaqueSide, type TrophyOptions } from '../src/core/trophy';
 
 type Wasm = Awaited<ReturnType<typeof Module>>;
 let wasm: Wasm;
@@ -61,7 +61,7 @@ function bbox(p: Float32Array) {
 }
 
 const base: TrophyOptions = { shape: 'rectangle', plinth: 'none', plinthHeightMm: 15, taper: 0.12, text: null };
-const text = { lines: ['Mount Rainier', '14,411 ft · 2026'], style: 'raised' as const, depthMm: 0.8 };
+const text = { lines: ['Mount Rainier', '14,411 ft · 2026'], style: 'raised' as const, side: 'front' as PlaqueSide, depthMm: 0.8 };
 
 describe('footprint', () => {
   it('fits each shape inside the selection', () => {
@@ -162,6 +162,35 @@ describe('buildTrophyParts', () => {
       expect(vol({ ...o, text: { ...text, style: 'engraved' } }), `${shape} engraved`).toBeLessThan(plain - 10);
     }
   });
+
+  it('puts the nameplate on the chosen side', () => {
+    const wide = dem(121, 81); // 120 × 80 mm: left/right faces run along the short side
+    const sides: [PlaqueSide, number, number][] = [['front', 1, -1], ['back', 1, 1], ['left', 0, -1], ['right', 0, 1]];
+    for (const shape of ['rectangle', 'circle', 'hexagon'] as const) {
+      for (const [side, axis, sign] of sides) {
+        const o: TrophyOptions = { ...base, shape, plinth: 'straight', text: { ...text, side } };
+        const fp = footprint(shape, 120, 80, true, side);
+        // The footprint fits the area.
+        for (const [x, y] of fp.outline) {
+          expect(Math.abs(x)).toBeLessThanOrEqual(60 + 1e-6);
+          expect(Math.abs(y)).toBeLessThanOrEqual(40 + 1e-6);
+        }
+        const r = buildTrophyParts(wasm, wide, meshOpts, o, font);
+        const plinth = r.parts[1];
+        expectSolid(plinth.positions, plinth.indices);
+        // Raised letters stick out 0.8 mm past the flat face on the chosen side…
+        const b = bbox(plinth.positions);
+        const out = sign < 0 ? -b.min[axis] : b.max[axis];
+        const other = sign < 0 ? b.max[axis] : -b.min[axis];
+        expect(out, `${shape} ${side}`).toBeCloseTo(fp.frontY + 0.8, 1);
+        // …and the opposite side is just the bare footprint.
+        const bare = Math.max(...fp.outline.map((p) => (sign < 0 ? p[axis] : -p[axis])));
+        expect(other, `${shape} ${side} opposite`).toBeCloseTo(bare, 3);
+        const solid = unionParts(wasm, r.parts);
+        expectSolid(solid.positions, solid.indices);
+      }
+    }
+  }, 60_000);
 
   it('plinth is a full prism or frustum, not a wedge', () => {
     const k = 1.12, P = 15;

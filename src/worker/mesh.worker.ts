@@ -47,7 +47,7 @@ async function build(req: BuildRequest) {
 
   const trophy = {
     ...req.trophy,
-    text: req.text ? { lines: plaqueLines(req.text, dem.maxM), style: req.text.style, depthMm: 0.8 } : null,
+    text: req.text ? { lines: plaqueLines(req.text, dem.maxM), style: req.text.style, side: req.text.side, depthMm: 0.8 } : null,
   };
   const plinth = hasPlinth(trophy);
   if (plinth) send({ id, type: 'progress', message: 'Building trophy…' });

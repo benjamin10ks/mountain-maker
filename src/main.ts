@@ -1,7 +1,7 @@
 import './style.css';
 import { fractionsToLngLat, groundSizeMeters, type LngLatBounds } from './core/geo';
 import { describeGrid, NOZZLES_MM, PRINTERS, recommend, type Recommendation } from './core/printers';
-import { hasPlinth, plinthScale, trophyFootprint, type PlinthStyle, type Shape, type TrophyOptions } from './core/trophy';
+import { hasPlinth, plinthScale, SIDE_ANGLE, trophyFootprint, type PlaqueSide, type PlinthStyle, type Shape, type TrophyOptions } from './core/trophy';
 import { initLayout } from './ui/layout';
 import { createAreaMap } from './ui/map';
 import { createPreview } from './ui/preview';
@@ -138,6 +138,7 @@ function plaqueText(): PlaqueText | null {
     includeElevation: ui.textElev.checked,
     allCaps: ui.textCaps.checked,
     style: radio('text-style') as PlaqueText['style'],
+    side: radio('text-side') as PlaqueSide,
   };
   return t.name.trim() || t.subtitle.trim() || t.includeElevation ? t : null;
 }
@@ -145,7 +146,7 @@ function plaqueText(): PlaqueText | null {
 /** The trophy options with placeholder text, for layout decisions made before a build. */
 function trophyForLayout(): TrophyOptions {
   const t = plaqueText();
-  return { ...trophyOptions(), text: t ? { lines: ['x'], style: t.style, depthMm: 0.8 } : null };
+  return { ...trophyOptions(), text: t ? { lines: ['x'], style: t.style, side: t.side, depthMm: 0.8 } : null };
 }
 
 // ---- Recommendation and fit ---------------------------------------------------
@@ -159,7 +160,7 @@ function update() {
   ui.plaque.disabled = !hasPlinth(trophy);
   ui.plaqueNote.textContent = hasPlinth(trophy)
     ? trophy.shape === 'circle' && trophy.text
-      ? 'Round trophies get a flat front for the nameplate.'
+      ? 'Round trophies get a flat edge for the nameplate.'
       : ''
     : 'Add a plinth to put a nameplate on the front.';
   if (!bounds) return;
@@ -283,7 +284,10 @@ worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
   built = true;
   buildFinished();
   $('preview').querySelector('.placeholder')?.remove();
-  preview.show(msg.result.preview.positions, msg.result.preview.normals, msg.result.sizeMm);
+  // Face the nameplate when there is one.
+  const t = plaqueText();
+  const viewFrom = t && hasPlinth(trophyForLayout()) ? SIDE_ANGLE[t.side] : 0;
+  preview.show(msg.result.preview.positions, msg.result.preview.normals, msg.result.sizeMm, viewFrom);
   showStats(msg.result);
 };
 

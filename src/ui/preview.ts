@@ -42,12 +42,16 @@ export function createPreview(container: HTMLElement) {
     renderer.render(scene, camera);
   });
 
-  // Radius of the model the camera was last framed for; 0 = never framed.
+  // Radius of the model the camera was last framed for (0 = never), and the side it looks from.
   let framedFor = 0;
+  let framedFrom = 0;
 
   return {
-    /** Non-indexed triangles centered on the origin in x/y, bottom at z=0. */
-    show(positions: Float32Array, normals: Float32Array, sizeMm: [number, number, number]) {
+    /**
+     * Non-indexed triangles centered on the origin in x/y, bottom at z=0. `viewFromDeg`
+     * turns the default view from the front (south) counter-clockwise, e.g. 180 = back.
+     */
+    show(positions: Float32Array, normals: Float32Array, sizeMm: [number, number, number], viewFromDeg = 0) {
       for (const child of group.children) (child as THREE.Mesh).geometry.dispose();
       group.clear();
 
@@ -60,11 +64,14 @@ export function createPreview(container: HTMLElement) {
       // Keep the user's view for small tweaks, but reframe when the model changes size
       // enough that it would be cropped or tiny (e.g. a big exaggeration change).
       const r = Math.hypot(x, y, z) / 2;
-      if (Math.abs(r - framedFor) > framedFor * 0.1) {
+      if (Math.abs(r - framedFor) > framedFor * 0.1 || viewFromDeg !== framedFrom) {
         const dist = (r / Math.sin((camera.fov * Math.PI) / 360)) * 0.8; // spheres over-estimate a flat-ish tile
         controls.target.set(0, 0, z / 2);
-        camera.position.set(0, -dist * 0.8, z / 2 + dist * 0.6); // from the south, 37° up
+        const a = (viewFromDeg * Math.PI) / 180;
+        // From the south (turned to the nameplate side), 37° up.
+        camera.position.set(dist * 0.8 * Math.sin(a), -dist * 0.8 * Math.cos(a), z / 2 + dist * 0.6);
         framedFor = r;
+        framedFrom = viewFromDeg;
       }
     },
   };

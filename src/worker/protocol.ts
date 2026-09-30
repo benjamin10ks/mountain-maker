@@ -1,6 +1,6 @@
 import type { LngLatBounds } from '../core/geo';
 import type { MeshOptions } from '../core/mesh';
-import type { TrophyOptions } from '../core/trophy';
+import type { PlaqueSide, TrophyOptions } from '../core/trophy';
 
 export interface PlaqueText {
   name: string;
@@ -8,6 +8,7 @@ export interface PlaqueText {
   includeElevation: boolean;
   allCaps: boolean;
   style: 'raised' | 'engraved';
+  side: PlaqueSide;
 }
 
 export interface BuildRequest {

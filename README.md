@@ -20,8 +20,9 @@ npm run dev          # http://localhost:5173
    **Custom**, then set nozzle and layer height.
 3. **Terrain:** area width in mm, vertical exaggeration, and terrain base thickness.
 4. **Trophy:** shape (rectangle, circle, hexagon), plinth (none, straight, tapered), and
-   a nameplate on the plinth's front: name, optional subtitle (e.g. a summit date), the
-   highest elevation in the area, raised or engraved.
+   a nameplate on one side of the plinth (front, back, left or right; front is the
+   map's south edge): name, optional subtitle (e.g. a summit date), the highest
+   elevation in the area, raised or engraved.
 5. **Resolution:** the recommended grid is shown with the reason for the limit. Tick
    **Custom** to override it.
 6. **Generate model**, inspect the 3D preview, then **Download STL**. After the first
@@ -209,10 +210,19 @@ Prusa MK4/MK4S 250×210×220. **Custom** unlocks the bed fields. Presets live in
 - **Rectangle, circle, hexagon.** Circle and hexagon are the largest of their kind that fit
   inside the selected area. The map shows the printed shape filled inside the dashed
   selection box.
-- **Hexagons have a flat side facing south**, so there's a flat face for the nameplate.
-- **Round trophies with text get a flat front** (a "D" shape, chord at 80% of the radius).
-  Flat text wrapped onto a curved face would be distorted or need curved extrusion.
-  Without text, circles stay fully round.
+- **The nameplate can go on any of four sides**: front, back, left or right, relative to
+  the map (front = south). Many peaks' best face isn't the south one, so you can keep
+  the good side of the mountain clear and put the text behind or beside it.
+- Each shape is laid out once with the nameplate at the front, then rotated to the chosen
+  side (`footprint()` swaps width and depth for left/right so it still fits the area).
+  The text plate gets the same rotation, so every shape works on every side with one
+  code path. Tests build all 12 shape × side combinations on a non-square area.
+- **Hexagons turn so a flat side faces the nameplate.** For left/right that makes the
+  points face north and south.
+- **Round trophies with text get a flat edge on the nameplate side** (a "D" shape, chord
+  at 80% of the radius). Flat text wrapped onto a curved face would be distorted or need
+  curved extrusion. Without text, circles stay fully round.
+- The preview camera turns to face the nameplate whenever the side changes.
 - "Area width" still means the width of the selected area. For circles and hexagons the
   finished footprint is shown in the stats and checked against the bed.
 
@@ -306,7 +316,7 @@ non-indexed buffers straight to three.js.
 
 ## Known limitations
 
-- Text is only on the front face, in one font.
+- One nameplate per trophy, in one font.
 - Areas are measured with a single `cos(latitude)` scale. Very tall selections (hundreds
   of km north–south) will be slightly distorted.
 - The first production chunk is about 1.6 MB (MapLibre + three.js). This could be
@@ -319,8 +329,8 @@ non-indexed buffers straight to three.js.
 1. ~~**Core engine:** bbox → 3DEP → watertight STL~~ ✅
 2. ~~**Web UI:** map, search, drag-select, printer presets, recommendations, preview~~ ✅ (first version)
 3. ~~**Trophy:** round/hex crops, straight/tapered plinths, raised/engraved nameplate~~ ✅
-   Next: stepped plinth, font choice, text on the back, touch drawing, a mark at the
-   summit
+   Nameplate side (front/back/left/right) ✅. Next: stepped plinth, font choice, a
+   second nameplate, touch drawing, a mark at the summit
 4. **Multi-color:** 3MF export with separate bodies (snowcap above an elevation, water,
    base) for the Bambu AMS
 5. **Hosting:** static deploy, production geocoder, code-splitting

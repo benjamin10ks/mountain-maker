@@ -7,6 +7,11 @@ import { layoutPlaque, type Vec2 } from './text';
 
 export type Shape = 'rectangle' | 'circle' | 'hexagon';
 export type PlinthStyle = 'none' | 'straight' | 'tapered';
+/** Which face carries the nameplate. Front is the south edge of the map. */
+export type PlaqueSide = 'front' | 'back' | 'left' | 'right';
+
+/** Counter-clockwise rotation (degrees) taking the front (−y) to each side. */
+export const SIDE_ANGLE: Record<PlaqueSide, number> = { front: 0, right: 90, back: 180, left: 270 };
 
 export interface TrophyOptions {
   shape: Shape;
@@ -17,6 +22,7 @@ export interface TrophyOptions {
   text: {
     lines: string[];
     style: 'raised' | 'engraved';
+    side: PlaqueSide;
     depthMm: number;
   } | null;
 }
@@ -26,9 +32,11 @@ export interface Footprint {
   outline: Vec2[];
   width: number;
   depth: number;
-  /** Distance from the center to the flat front (south) face; 0 if there is none. */
+  /** Distance from the center to the flat nameplate face; 0 if there is none. */
   frontY: number;
   frontWidth: number;
+  /** Rotation (degrees, CCW) from the front-facing layout to the nameplate side. */
+  angle: number;
 }
 
 const COS30 = Math.cos(Math.PI / 6);
@@ -40,18 +48,42 @@ const EPS = 0.02;
 
 /**
  * The largest shape of the given kind that fits inside a width × depth rectangle.
- * Hexagons have a flat side facing south so there's a face for text.
+ * Hexagons are turned so a flat side faces the nameplate side; round shapes with text get
+ * a flat edge there.
  */
-export function footprint(shape: Shape, width: number, depth: number, flatFront: boolean): Footprint {
+export function footprint(
+  shape: Shape,
+  width: number,
+  depth: number,
+  flatFront: boolean,
+  side: PlaqueSide = 'front',
+): Footprint {
+  // Lay the shape out with the nameplate face at the front (−y), then turn it to the
+  // chosen side. For left/right the face runs along the area's depth, so swap axes.
+  const angle = SIDE_ANGLE[side];
+  const turned = angle % 180 !== 0;
+  const fp = frontFacing(shape, turned ? depth : width, turned ? width : depth, flatFront);
+  if (!angle) return fp;
+  const c = Math.round(Math.cos((angle * Math.PI) / 180)), s = Math.round(Math.sin((angle * Math.PI) / 180));
+  return {
+    ...fp,
+    outline: fp.outline.map(([x, y]): Vec2 => [c * x - s * y, s * x + c * y]),
+    width: turned ? fp.depth : fp.width,
+    depth: turned ? fp.width : fp.depth,
+    angle,
+  };
+}
+
+function frontFacing(shape: Shape, width: number, depth: number, flatFront: boolean): Footprint {
   if (shape === 'rectangle') {
     const w = width / 2, d = depth / 2;
-    return { outline: [[-w, -d], [w, -d], [w, d], [-w, d]], width, depth, frontY: d, frontWidth: width };
+    return { outline: [[-w, -d], [w, -d], [w, d], [-w, d]], width, depth, frontY: d, frontWidth: width, angle: 0 };
   }
   if (shape === 'hexagon') {
     const R = Math.min(width / 2, depth / (2 * COS30));
     const outline: Vec2[] = [];
     for (let i = 0; i < 6; i++) outline.push([R * Math.cos((i * Math.PI) / 3), R * Math.sin((i * Math.PI) / 3)]);
-    return { outline, width: 2 * R, depth: 2 * R * COS30, frontY: R * COS30, frontWidth: R };
+    return { outline, width: 2 * R, depth: 2 * R * COS30, frontY: R * COS30, frontWidth: R, angle: 0 };
   }
   const R = Math.min(width, depth) / 2;
   if (!flatFront) {
@@ -60,7 +92,7 @@ export function footprint(shape: Shape, width: number, depth: number, flatFront:
       const a = (i / CIRCLE_SEGMENTS) * 2 * Math.PI;
       outline.push([R * Math.cos(a), R * Math.sin(a)]);
     }
-    return { outline, width: 2 * R, depth: 2 * R, frontY: 0, frontWidth: 0 };
+    return { outline, width: 2 * R, depth: 2 * R, frontY: 0, frontWidth: 0, angle: 0 };
   }
   // "D" shape: an arc from the right end of the front chord, around through north, to the left end.
   const d = FLAT_FRONT * R;
@@ -72,7 +104,7 @@ export function footprint(shape: Shape, width: number, depth: number, flatFront:
     const a = a0 + ((a1 - a0) * i) / n;
     outline.push([R * Math.cos(a), R * Math.sin(a)]);
   }
-  return { outline, width: 2 * R, depth: R + d, frontY: d, frontWidth: 2 * Math.sqrt(R * R - d * d) };
+  return { outline, width: 2 * R, depth: R + d, frontY: d, frontWidth: 2 * Math.sqrt(R * R - d * d), angle: 0 };
 }
 
 export function hasPlinth(o: TrophyOptions): boolean {
@@ -80,7 +112,7 @@ export function hasPlinth(o: TrophyOptions): boolean {
 }
 
 export function trophyFootprint(o: TrophyOptions, width: number, depth: number): Footprint {
-  return footprint(o.shape, width, depth, hasPlinth(o) && !!o.text?.lines.some((l) => l.trim()));
+  return footprint(o.shape, width, depth, hasPlinth(o) && !!o.text?.lines.some((l) => l.trim()), o.text?.side);
 }
 
 /** Scale of the plinth's bottom relative to its top. */
@@ -175,6 +207,7 @@ function buildPlinth(
       plate = own(plate.rotate([90, 0, 0]));
       plate = own(plate.rotate([(-theta * 180) / Math.PI, 0, 0]));
       plate = own(plate.translate(0, (-fp.frontY * (1 + k)) / 2, P / 2));
+      if (fp.angle) plate = own(plate.rotate([0, 0, fp.angle]));
       body = own(o.text.style === 'raised' ? Manifold.union(body, plate) : body.subtract(plate));
     } else if (o.text && lines.length && fp.frontWidth === 0) {
       warnings.push('This shape has no flat face for text.');

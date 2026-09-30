@@ -74,6 +74,13 @@
             <label>Subtitle <input id="text-sub" type="text" placeholder="e.g. Summited July 2026" /></label>
             <label class="check"><input id="text-elev" type="checkbox" checked /> Add highest elevation in area</label>
             <label class="check"><input id="text-caps" type="checkbox" checked /> All caps</label>
+            <span class="field-label">Side <span class="muted">(front = south edge of the map)</span></span>
+            <div class="segmented" role="radiogroup" aria-label="Nameplate side">
+              <label><input type="radio" name="text-side" value="front" checked /> Front</label>
+              <label><input type="radio" name="text-side" value="back" /> Back</label>
+              <label><input type="radio" name="text-side" value="left" /> Left</label>
+              <label><input type="radio" name="text-side" value="right" /> Right</label>
+            </div>
             <div class="segmented" role="radiogroup" aria-label="Text style">
               <label><input type="radio" name="text-style" value="raised" checked /> Raised</label>
               <label><input type="radio" name="text-style" value="engraved" /> Engraved</label>
